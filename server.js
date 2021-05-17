@@ -6,6 +6,11 @@ const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const User = require('./models/User');
 
+var ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+var ffmpeg = require('fluent-ffmpeg');
+ffmpeg.setFfmpegPath(ffmpegPath);
+var command = ffmpeg();
+
 const express = require('express');
 const app = express();
 
@@ -29,6 +34,7 @@ app.get('/', (req, res) => {
 })
 
 const http = require('http');
+const { Z_FIXED } = require('zlib');
 const server = http.createServer(app);
 
 const io = require('socket.io')(server, {
@@ -51,15 +57,51 @@ io.sockets.on("connection", client => {
     let chunks = [];
     let token = client.handshake.headers["auth-token"];
     // console.log("token", token);
-
+    const clientId = client.id;
     client.on('fileData', (data, fn) => {
-        //console.log("file data", data);
-        chunks.push(data);
+        // let fileName = client.id + '.txt'
+        let fileName = client.id + '.webm'
+        let path = './public/videos/' + fileName;
+        let base64 = data.toString("base64");
+        fs.appendFile(path, data, null, (err)=>{
+            if(err) throw err;
+            console.log('appened');
+        })
+        // chunks.push(data);
     });
     client.on('stop', (data, fn) => {
-        const date = Date.now();
+        let originalFile = './public/videos/' + client.id
         let fileName = client.id + '.mp4'
+        const webmPath = './public/videos/' + client.id + ".webm";
         const path = './public/videos/' + fileName;
+
+        var outStream = fs.createWriteStream(path);
+        var inStream = fs.createReadStream(webmPath);
+        var command = ffmpeg({ source: inStream })
+            .on('error', function(err) {
+                console.log(err);
+                console.log('An error occurred: ' + err.message);
+            })
+            .on('end', function() {
+                console.log('Processing finished !');
+                let fileUrl = fullUrl + path.replace('./public/', '');
+                //console.log(fullUrl + fileUrl);
+                fn({VideoUrl: fileUrl});
+                try {
+                    fs.unlinkSync(webmPath)
+                    //file removed
+                  } catch(err) {
+                    console.error(err)
+                  }
+            })
+            .saveToFile(path);
+        // const newPath = 
+        // command
+        // .input(webmPath)
+        // .output(path)
+        // .noAudio()
+        // .run()
+
         let id = "";
         if(token){
             //we need to verify token
@@ -74,14 +116,8 @@ io.sockets.on("connection", client => {
         }
 
         //console.log(path);
-        var diskWriterStream = fs.createWriteStream(path);
-        chunks.forEach(chunk => {
-            diskWriterStream.write(chunk);
-        });
-        let fileUrl = fullUrl + path.replace('./public/', '');
-        //console.log(fullUrl + fileUrl);
-        fn({VideoUrl: fileUrl});
-
+        
+        
         
         if(id){
             //save file for the user
@@ -92,6 +128,16 @@ io.sockets.on("connection", client => {
                 })
             });
         }
+
+        // const interval = setInterval(function(){
+        //     if(fs.existsSync(path)){
+        //         let fileUrl = fullUrl + path.replace('./public/', '');
+        //         //console.log(fullUrl + fileUrl);
+        //         fn({VideoUrl: fileUrl});
+        //         clearInterval(interval);
+        //     }
+        // }, 1000);
+        
        
     })
 });
